@@ -154,8 +154,6 @@ export default function App() {
 
       {/* ── HERO ── */}
       <section style={styles.hero}>
-        <div style={styles.heroBlob1} />
-        <div style={styles.heroBlob2} />
         <div style={styles.heroInner}>
           <span style={styles.heroTag}>Nueva temporada 2026</span>
           <h1 style={styles.heroTitle}>
@@ -709,33 +707,16 @@ const styles = {
   hero: {
     position: "relative",
     overflow: "hidden",
-    padding: "clamp(60px, 12vw, 130px) clamp(16px, 4vw, 48px)",
-    background: "linear-gradient(135deg, #FFF0F5 0%, #F0F1FF 50%, #EAFBF5 100%)",
-  },
-  heroBlob1: {
-    position: "absolute",
-    top: "-80px",
-    right: "-60px",
-    width: 320,
-    height: 320,
-    borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(255,93,143,0.35), transparent 70%)",
-    filter: "blur(10px)",
-  },
-  heroBlob2: {
-    position: "absolute",
-    bottom: "-100px",
-    left: "-70px",
-    width: 340,
-    height: 340,
-    borderRadius: "50%",
-    background: "radial-gradient(circle, rgba(91,123,255,0.28), transparent 70%)",
-    filter: "blur(10px)",
+    padding: "clamp(90px, 16vw, 180px) clamp(16px, 4vw, 48px)",
+    backgroundImage:
+      "linear-gradient(90deg, rgba(20,10,40,0.82) 0%, rgba(20,10,40,0.55) 55%, rgba(20,10,40,0.35) 100%), url('/hero.jpg')",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
   },
   heroInner: { position: "relative", maxWidth: 720, zIndex: 2 },
   heroTag: {
     display: "inline-block",
-    background: "#20123A",
+    background: "#FF5D8F",
     color: "#fff",
     fontSize: 13,
     fontWeight: 700,
@@ -749,13 +730,16 @@ const styles = {
     lineHeight: 0.98,
     letterSpacing: "-0.04em",
     margin: 0,
+    color: "#fff",
+    textShadow: "0 2px 20px rgba(0,0,0,0.35)",
   },
   heroSub: {
     fontSize: "clamp(16px, 2.2vw, 20px)",
-    color: "#5A4E6E",
+    color: "rgba(255,255,255,0.92)",
     lineHeight: 1.55,
     maxWidth: 480,
     margin: "22px 0 32px",
+    textShadow: "0 1px 12px rgba(0,0,0,0.35)",
   },
   heroBtns: { display: "flex", gap: 14, flexWrap: "wrap" },
   // sections
