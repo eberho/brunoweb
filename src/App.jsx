@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Plus, Pencil, Trash2, X, ImageIcon, Check, MessageCircle, Settings, Lock, LogOut } from "lucide-react";
-import { storage } from "./storage";
-
-// ── Design tokens ────────────────────────────────────────────────
-// Base:      #FBFAF7 warm paper
-// Ink:       #1C1917 near-black text
-// Thread:    #3B4A3F deep sage (brand)
-// Accent:    #C8553D burnt sienna (price / CTA)
-// Muted:     #8A857C stone
+import { hasSupabase } from "./supabaseClient";
+import {
+  fetchProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  fetchPhone,
+  savePhone as savePhoneDB,
+  uploadPhoto,
+} from "./db";
 
 const CURRENCY = "$";
-const STORE_KEY = "catalog:v1";
-const PHONE_KEY = "shopPhone:v1";
 // Contraseña del administrador. Cámbiala por la que quieras.
 const ADMIN_PASSWORD = "admin123";
 
@@ -19,7 +19,7 @@ const MAX_PHOTOS = 3;
 const CATEGORIES = ["Ropa", "Calzado", "Accesorios", "Ofertas"];
 const empty = { id: null, name: "", price: "", desc: "", photos: [], category: "Ropa" };
 
-// Compat: normaliza productos viejos que tenían una sola "photo"
+// Compat: normaliza productos que tuvieran una sola "photo"
 const getPhotos = (it) => {
   if (Array.isArray(it.photos)) return it.photos.filter(Boolean);
   if (it.photo) return [it.photo];
@@ -35,43 +35,39 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [activeCat, setActiveCat] = useState("Todo");
+  const [error, setError] = useState("");
   const fileRef = useRef(null);
 
-  // Load catalog + phone (shared = true so every visitor sees the same catalog)
+  // Carga el catálogo y el teléfono desde Supabase (compartido para todos)
   useEffect(() => {
     (async () => {
-      try {
-        const res = await storage.get(STORE_KEY);
-        if (res && res.value) setItems(JSON.parse(res.value));
-      } catch (e) {
-        // no catalog yet — that's fine
+      if (!hasSupabase) {
+        setError(
+          "Falta configurar Supabase. Revisa el README (variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY)."
+        );
+        setLoading(false);
+        return;
       }
       try {
-        const p = await storage.get(PHONE_KEY);
-        if (p && p.value) setPhone(p.value);
+        const [products, ph] = await Promise.all([fetchProducts(), fetchPhone()]);
+        setItems(products);
+        setPhone(ph || "");
       } catch (e) {
-        // no phone set yet
+        console.error(e);
+        setError("No se pudo cargar el catálogo. Revisa la conexión con Supabase.");
       }
       setLoading(false);
     })();
   }, []);
 
-  const persist = async (next) => {
-    setItems(next);
-    try {
-      await storage.set(STORE_KEY, JSON.stringify(next));
-    } catch (e) {
-      console.error("No se pudo guardar", e);
-    }
-  };
-
   const savePhone = async (value) => {
     const clean = value.replace(/[^\d]/g, "");
     setPhone(clean);
     try {
-      await storage.set(PHONE_KEY, clean);
+      await savePhoneDB(clean);
     } catch (e) {
       console.error("No se pudo guardar el teléfono", e);
+      alert("No se pudo guardar el número. Intenta de nuevo.");
     }
     setShowSettings(false);
   };
@@ -84,18 +80,29 @@ export default function App() {
   };
 
   const saveItem = async (data) => {
-    let next;
-    if (data.id) {
-      next = items.map((it) => (it.id === data.id ? data : it));
-    } else {
-      next = [...items, { ...data, id: Date.now().toString() }];
+    try {
+      if (data.id) {
+        await updateProduct(data);
+        setItems((prev) => prev.map((it) => (it.id === data.id ? data : it)));
+      } else {
+        const newId = await createProduct(data);
+        setItems((prev) => [...prev, { ...data, id: newId }]);
+      }
+      setEditing(null);
+    } catch (e) {
+      console.error(e);
+      alert("No se pudo guardar el producto. Intenta de nuevo.");
     }
-    await persist(next);
-    setEditing(null);
   };
 
   const removeItem = async (id) => {
-    await persist(items.filter((it) => it.id !== id));
+    try {
+      await deleteProduct(id);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+    } catch (e) {
+      console.error(e);
+      alert("No se pudo eliminar el producto.");
+    }
   };
 
   return (
@@ -222,6 +229,10 @@ export default function App() {
 
         {loading ? (
           <p style={styles.state}>Cargando catálogo…</p>
+        ) : error ? (
+          <div style={styles.emptyBox}>
+            <p style={{ margin: 0, color: "#FF3B6B", fontWeight: 600 }}>{error}</p>
+          </div>
         ) : items.length === 0 ? (
           <div style={styles.emptyBox}>
             <ImageIcon size={40} strokeWidth={1.4} color="#C9C4DE" />
@@ -513,35 +524,38 @@ function Carousel({ photos, name }) {
 // ── Editor modal ─────────────────────────────────────────────────
 function Editor({ initial, onCancel, onSave }) {
   const [form, setForm] = useState({ ...initial, photos: getPhotos(initial) });
+  const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  const onAddPhotos = (e) => {
+  const onAddPhotos = async (e) => {
     const files = Array.from(e.target.files || []);
+    e.target.value = ""; // permitir volver a elegir el mismo archivo
     if (!files.length) return;
     const room = MAX_PHOTOS - form.photos.length;
-    const toRead = files.slice(0, room);
-    Promise.all(
-      toRead.map(
-        (file) =>
-          new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.readAsDataURL(file);
-          })
-      )
-    ).then((imgs) => {
-      setForm((f) => ({ ...f, photos: [...f.photos, ...imgs].slice(0, MAX_PHOTOS) }));
-    });
-    e.target.value = ""; // permitir volver a elegir el mismo archivo
+    const toUpload = files.slice(0, room);
+    setUploading(true);
+    try {
+      const urls = [];
+      for (const file of toUpload) {
+        const url = await uploadPhoto(file);
+        urls.push(url);
+      }
+      setForm((f) => ({ ...f, photos: [...f.photos, ...urls].slice(0, MAX_PHOTOS) }));
+    } catch (err) {
+      console.error(err);
+      alert("No se pudo subir la foto. Revisa tu conexión y la configuración de Supabase.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const removePhoto = (idx) => {
     setForm((f) => ({ ...f, photos: f.photos.filter((_, k) => k !== idx) }));
   };
 
-  const canSave = form.name.trim().length > 0;
+  const canSave = form.name.trim().length > 0 && !uploading;
 
   return (
     <div style={styles.overlay} onClick={onCancel}>
@@ -577,9 +591,16 @@ function Editor({ initial, onCancel, onSave }) {
                 style={styles.addThumb}
                 className="add-thumb"
                 onClick={() => inputRef.current?.click()}
+                disabled={uploading}
               >
-                <Plus size={22} strokeWidth={2} color="#8A857C" />
-                <span style={{ fontSize: 11, color: "#8A857C" }}>Agregar</span>
+                {uploading ? (
+                  <span style={{ fontSize: 11, color: "#8A857C" }}>Subiendo…</span>
+                ) : (
+                  <>
+                    <Plus size={22} strokeWidth={2} color="#8A857C" />
+                    <span style={{ fontSize: 11, color: "#8A857C" }}>Agregar</span>
+                  </>
+                )}
               </button>
             )}
           </div>
